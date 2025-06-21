@@ -1,0 +1,16 @@
+[project]
+name = "pinn-project"
+version = "0.1.0"
+description = "Physics-Informed Neural Network project with leapfrog integrator and particle tracking."
+authors = ["Your Name <your.email@example.com>"]
+requires-python = ">=3.8"
+
+[project.dependencies]
+torch = "*"
+numpy = "*"
+matplotlib = "*"
+xsuite = "*"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
