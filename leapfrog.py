@@ -18,6 +18,6 @@ class Leapfrog():
 
     def step(self, q, p, s):
         p_half = p + 0.5 * self.step_size * self.hamiltonian.p_prime(q, p, s)
-        q_new = q + self.step_size * self.hamiltonian.q_prime(q, p_half, s)
-        p_new = p_half + 0.5 * self.step_size * self.hamiltonian.p_prime(q_new, p_half, s)
+        q_new = q + self.step_size * self.hamiltonian.q_prime(q, p_half, s + 0.5 * self.step_size)
+        p_new = p_half + 0.5 * self.step_size * self.hamiltonian.p_prime(q_new, p_half, s + self.step_size)
         return q_new, p_new
