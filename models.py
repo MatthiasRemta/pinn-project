@@ -130,7 +130,7 @@ class ResidualNet(nn.Module):
 
 class DeepONet(nn.Module):
     def __init__(self, branch_net, trunk_net):
-        super(DeepOnet, self).__init__()
+        super(DeepONet, self).__init__()
         self.branch_net = branch_net
         self.trunk_net = trunk_net
     
@@ -177,7 +177,7 @@ class ActivationModule(nn.Module):
     def __init__(self, dim, activation, mode):
         super(ActivationModule, self).__init__()
         self.dim = dim
-        self.activation = activation
+        self.act = activation
         self.mode = mode
         
         self.params = self.__init_params()
@@ -204,7 +204,7 @@ class GradientModule(nn.Module):
         super(GradientModule, self).__init__()
         self.dim = dim
         self.width = width
-        self.activation = activation
+        self.act = activation
         self.mode = mode
         
         self.params = self.__init_params()
@@ -258,31 +258,31 @@ class GSympNet(SympNet):
     Input: [num, dim] or [num, dim + 1]
     Output: [num, dim]
     '''
-def __init__(self, dim, layers=3, width=20, activation='sigmoid'):
-    super(GSympNet, self).__init__()
-    self.dim = dim
-    self.layers = layers
-    self.width = width
-    self.activation = activation
-    
-    self.modus = self.__init_modules()
-    
-def forward(self, pqh):
-    d = int(self.dim / 2)
-    if pqh.size(-1) == self.dim + 1:
-        p, q, h = pqh[..., :d], pqh[..., d:-1], pqh[..., -1:]
-    elif pqh.size(-1) == self.dim:
-        p, q, h = pqh[..., :d], pqh[..., d:], torch.ones_like(pqh[..., -1:])
-    else:
-        raise ValueError
-    for i in range(self.layers):
-        GradM = self.modus['GradM{}'.format(i + 1)]
-        p, q = GradM([p, q, h])
-    return torch.cat([p, q], dim=-1)
+    def __init__(self, dim, layers=3, width=20, activation=torch.sigmoid):
+        super(GSympNet, self).__init__()
+        self.dim = dim
+        self.layers = layers
+        self.width = width
+        self.activation = activation
+        
+        self.modus = self.__init_modules()
+        
+    def forward(self, pqh):
+        d = int(self.dim / 2)
+        if pqh.size(-1) == self.dim + 1:
+            p, q, h = pqh[..., :d], pqh[..., d:-1], pqh[..., -1:]
+        elif pqh.size(-1) == self.dim:
+            p, q, h = pqh[..., :d], pqh[..., d:], torch.ones_like(pqh[..., -1:])
+        else:
+            raise ValueError
+        for i in range(self.layers):
+            GradM = self.modus['GradM{}'.format(i + 1)]
+            p, q = GradM([p, q, h])
+        return torch.cat([p, q], dim=-1)
 
-def __init_modules(self):
-    modules = nn.ModuleDict()
-    for i in range(self.layers):
-        mode = 'up' if i % 2 == 0 else 'low'
-        modules['GradM{}'.format(i + 1)] = GradientModule(self.dim, self.width, self.activation, mode)
-    return modules
+    def __init_modules(self):
+        modules = nn.ModuleDict()
+        for i in range(self.layers):
+            mode = 'up' if i % 2 == 0 else 'low'
+            modules['GradM{}'.format(i + 1)] = GradientModule(self.dim, self.width, self.activation, mode)
+        return modules
