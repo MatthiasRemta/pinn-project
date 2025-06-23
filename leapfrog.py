@@ -8,7 +8,7 @@ class Hamiltonian():
     def q_prime(self, q, p, s):
         return self.q_prime(q, p, s)
 
-    def p_prime(self, q, p):
+    def p_prime(self, q, p, s):
         return self.p_prime(q, p, s)
 
 class Leapfrog():
