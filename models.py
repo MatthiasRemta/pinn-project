@@ -4,14 +4,48 @@ from torch import nn
 from torch.nn import functional as F, init
 
 
+class Fourier1d(nn.Module):
+    def __init__(self, complex_input=False, channels=1, modes=12):
+        super(Fourier1d, self).__init__()
+        self.weights = nn.Parameter(torch.randn(channels, channels, modes, dtype=torch.cdouble))
+        self.linear = nn.Conv1d(channels, channels, 1)
+        self.fft = torch.fft.fft if complex_input else torch.fft.rfft
+        self.ifft = torch.fft.ifft if complex_input else torch.fft.irfft
+        self.complex_input = complex_input
+        self.modes = modes
+
+    def forward(self, x):
+        batch_size, channels, gridpoints = x.shape
+        tmp = self.fft(x)[:, :, :self.modes]   # truncate higher mode
+        #tmp = torch.einsum('bcm,ocm->bom', tmp, self.weights)
+        tmp = torch.einsum('abc,bdc->adc', tmp, self.weights)
+        tmp = self.ifft(tmp, n=gridpoints)   # pad to original input size
+        mixing = self.linear(x)
+        output =  F.gelu(tmp + mixing)
+        return output
+    
+
+class FNO1d(nn.Module):
+    def __init__(self, input_channels=1, hidden_channels=16, output_channels=1, complex_input=False, fourier_layers=2, modes=12):
+        super(FNO1d, self).__init__()
+        model = nn.ModuleList([])
+        model.append(nn.Conv1d(input_channels, hidden_channels, 1))
+        for _ in range(fourier_layers):
+            model.append(Fourier1d(complex_input=complex_input, channels=hidden_channels, modes=modes))
+
+        model.append(nn.Conv1d(hidden_channels, output_channels, 1))
+
+        self.model = nn.Sequential(*model)
+    
+    def forward(self, x):
+        return self.model(x)
+    
 class DeepONet(nn.Module):
-    def __init__(self, branch_net, trunk_net, branch_dim=4, output_dim=4, hidden_dim=32):
+    def __init__(self, branch_net, trunk_net, branch_dim=2):
         super(DeepONet, self).__init__()
         self.branch_net = branch_net
         self.trunk_net = trunk_net
         self.branch_dim = branch_dim
-        self.output_dim = output_dim
-        self.hidden_dim = hidden_dim
     
     def forward(self, x):
         qp = x[:, :self.branch_dim]
@@ -20,8 +54,8 @@ class DeepONet(nn.Module):
         bases = self.branch_net(qp)
         coefficients = self.trunk_net(time)
 
-        output = bases * coefficients
-        return output.view(output.shape[0], self.output_dim, self.hidden_dim//self.output_dim).sum(dim=2)
+        return bases * coefficients
+
 
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, activation='tanh'):
@@ -49,104 +83,58 @@ class MLP(nn.Module):
 
 
 class ResidualBlock(nn.Module):
-    """A general-purpose residual block."""
-
     def __init__(
         self,
         features,
-        context_features,
-        activation=F.tanh,
-        dropout_probability=0.0,
-        use_batch_norm=False,
-        zero_initialization=True,
+        activation=nn.Tanh,
     ):
         super().__init__()
-        self.activation = activation
+        net = nn.ModuleList([])
+        
+        for _ in range(2):
+            net.append(activation())
+            net.append(nn.Linear(features, features))
 
-        self.use_batch_norm = use_batch_norm
-        if use_batch_norm:
-            self.batch_norm_layers = nn.ModuleList(
-                [nn.BatchNorm1d(features, eps=1e-3) for _ in range(2)]
-            )
-        if context_features is not None:
-            self.context_layer = nn.Linear(context_features, features)
-        self.linear_layers = nn.ModuleList(
-            [nn.Linear(features, features) for _ in range(2)]
-        )
-        self.dropout = nn.Dropout(p=dropout_probability)
-        if zero_initialization:
-            init.uniform_(self.linear_layers[-1].weight, -1e-3, 1e-3)
-            init.uniform_(self.linear_layers[-1].bias, -1e-3, 1e-3)
+        self.net = nn.Sequential(*net)
 
-    def forward(self, inputs, context=None):
-        temps = inputs
-        if self.use_batch_norm:
-            temps = self.batch_norm_layers[0](temps)
-        temps = self.activation(temps)
-        temps = self.linear_layers[0](temps)
-        if self.use_batch_norm:
-            temps = self.batch_norm_layers[1](temps)
-        temps = self.activation(temps)
-        temps = self.dropout(temps)
-        temps = self.linear_layers[1](temps)
-        if context is not None:
-            temps = F.glu(torch.cat((temps, self.context_layer(context)), dim=1), dim=1)
-        return inputs + temps
+    def forward(self, inputs):
+        tmp = self.net(inputs)
+        return inputs + tmp
 
 
 class ResidualNet(nn.Module):
-    """A general-purpose residual network. Works only with 1-dim inputs."""
-
     def __init__(
         self,
         in_features,
         out_features,
         hidden_features,
-        context_features=None,
         num_blocks=2,
-        activation=F.tanh,
-        dropout_probability=0.0,
-        use_batch_norm=False,
-        preprocessing=None,
+        activation=nn.Tanh,
         activate_output=False
     ):
         super().__init__()
         self.hidden_features = hidden_features
-        self.context_features = context_features
-        self.preprocessing = preprocessing
         self.activate_output = activate_output
-        if context_features is not None:
-            self.initial_layer = nn.Linear(
-                in_features + context_features, hidden_features
-            )
-        else:
-            self.initial_layer = nn.Linear(in_features, hidden_features)
+
+        self.initial_layer = nn.Linear(in_features, hidden_features)
         self.blocks = nn.ModuleList(
             [
                 ResidualBlock(
                     features=hidden_features,
-                    context_features=context_features,
                     activation=activation,
-                    dropout_probability=dropout_probability,
-                    use_batch_norm=use_batch_norm,
                 )
                 for _ in range(num_blocks)
             ]
         )
         self.final_layer = nn.Linear(hidden_features, out_features)
 
-    def forward(self, inputs, context=None):
-        if self.preprocessing is None:
-            temps = inputs
-        else:
-            temps = self.preprocessing(inputs)
-        if context is None:
-            temps = self.initial_layer(temps)
-        else:
-            temps = self.initial_layer(torch.cat((temps, context), dim=1))
+    def forward(self, inputs):
+        tmp = self.initial_layer(inputs)
+        
         for block in self.blocks:
-            temps = block(temps, context=context)
-        outputs = self.final_layer(temps)
+            tmp = block(tmp)
+        
+        outputs = self.final_layer(tmp)
         if self.activate_output:
             outputs = F.tanh(outputs)
         return outputs
